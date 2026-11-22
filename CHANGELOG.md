@@ -4,14 +4,14 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.3] - 2026-11-22
 
 ### Added
 
-- `SceneMaterial.color_write_mask` (`SCENE_COLOR_RED | GREEN | BLUE | ALPHA`): the channels a material writes, as ViroReact's `colorWriteMask`; 0 writes all of them. Needs gpu's `color_write_mask`.
+- `SceneMaterial.color_write_mask` (`SCENE_COLOR_RED | GREEN | BLUE | ALPHA`): the channels a material writes, as ViroReact's `colorWriteMask`; 0 writes all of them. Needs gpu 0.7.2, now the pinned version.
 - `SceneNode.portal_sky_rotation`: each portal's sky turns on its own, as ViroReact's per-portal background rotation; `Scene.sky_rotation` now turns only the scene's own sky.
 
-## [0.2.2] - 2026-11-18
+## [0.2.2]
 
 ### Added
 
