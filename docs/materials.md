@@ -138,6 +138,10 @@ buffer only: it is invisible, yet what lies behind it is hidden. Give it a lower
 `rendering_order` than what it hides so it is drawn first. In AR this is how the real world's
 mesh (LiDAR reconstruction) hides virtual content behind walls and furniture.
 
+`color_write_mask` writes only some channels: `SCENE_COLOR_RED`, `SCENE_COLOR_GREEN`,
+`SCENE_COLOR_BLUE` and `SCENE_COLOR_ALPHA` combined with `|` (ViroReact's other `colorWriteMask`
+values). 0, the default, writes all four.
+
 ## Shader variants
 
 Each material compiles to a variant: lighting model, alpha mode, blend mode (for blended

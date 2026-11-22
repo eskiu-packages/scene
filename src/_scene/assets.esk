@@ -424,6 +424,7 @@ Result<*GpuPipeline, string> _scene_pipeline(*Scene self, int key) {
         cull: scene_key_double_sided(key) ? WGPUCullMode_None : WGPUCullMode_Back};
     if (scene_key_skips_depth_test(key)) d.depth_compare = WGPUCompareFunction_Always;
     if (blend) d.blend_state = &bs;
+    d.color_write_mask = (uint32)scene_key_color_mask(key);
     if (scene_key_no_color(key)) {
         // an occluder: depth only
         d.no_color_write = true;

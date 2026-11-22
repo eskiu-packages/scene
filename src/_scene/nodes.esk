@@ -16,6 +16,7 @@ int _scene_new_node(*Scene self, int parent, string name) {
     if (name != null) String_from(&n.name, name);
     n.parent = parent;
     n.rotation = quat_identity();
+    n.portal_sky_rotation = quat_identity();
     n.scale = Vec3{1.0, 1.0, 1.0};
     n.visible = true;
     n.alive = true;

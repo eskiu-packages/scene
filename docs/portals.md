@@ -31,7 +31,8 @@ Each frame the scene draws:
    top, and its own neighbors one level deeper.
 
 `portal_sky` is a texture id from `Scene_add_texture`: a cube map, or a 360 image with
-`portal_sky_pano`. A portal without a sky shows, where its contents leave room, what was
+`portal_sky_pano`, turned by `portal_sky_rotation` (the scene's `sky_rotation` turns only the
+scene's own sky). A portal without a sky shows, where its contents leave room, what was
 drawn there before (in AR, the camera image).
 
 ## Lighting environment

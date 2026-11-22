@@ -127,6 +127,22 @@ Result<int, string> run() {
     target.read(px)?;
     expect("the portal's sky through the window", pixel(px, 16, 16), Vec3{0.0, 1.0, 1.0});
     expect("the outer world has none", pixel(px, 2, 16), green);
+    // turned by its own rotation, not the scene's: a 360 image half red, half blue
+    uint8[8] halves = {255, 0, 0, 255, 0, 0, 255, 255};
+    scene.node(portal).portal_sky = scene.add_texture(gpu.image_with(2, 1, &halves[0], &lo)?);
+    scene.render_to(&target)?;
+    target.read(px)?;
+    bool red_ahead = pixel(px, 16, 16).x > 0.5;
+    scene.sky_rotation = quat_axis_angle(Vec3{0.0, 1.0, 0.0}, 3.14159265);
+    scene.render_to(&target)?;
+    target.read(px)?;
+    check("the scene's sky rotation leaves the portal's sky", (pixel(px, 16, 16).x > 0.5) == red_ahead);
+    scene.sky_rotation = quat_identity();
+    scene.node(portal).portal_sky_rotation = quat_axis_angle(Vec3{0.0, 1.0, 0.0}, 3.14159265);
+    scene.render_to(&target)?;
+    target.read(px)?;
+    check("portal_sky_rotation turns the portal's sky", (pixel(px, 16, 16).x > 0.5) != red_ahead);
+    scene.node(portal).portal_sky_rotation = quat_identity();
     scene.node(inside).visible = true;
 
     // walk through: the camera moves past the window into the portal's world

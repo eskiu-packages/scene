@@ -168,6 +168,7 @@ struct SceneNode {
     bool passable;
     int portal_sky;
     bool portal_sky_pano;
+    Quat portal_sky_rotation;
     *GpuIbl portal_ibl;
     bool ignore_events;
     bool precise_hits;
@@ -193,7 +194,7 @@ ordering; with a material that skips the depth test it puts a panel on top. bill
 (SCENE_BILLBOARD_*) turns the node to face the camera. portal makes the node's subtree a
 world of its own, seen through the meshes of its descendants marked portal_entrance
 (ViroPortalScene and ViroPortal), with portal_sky (a texture id: a cube, or a 360 image
-with portal_sky_pano) behind it and portal_ibl (a GpuIbl, not owned) lighting its PBR
+with portal_sky_pano, turned by portal_sky_rotation) behind it and portal_ibl (a GpuIbl, not owned) lighting its PBR
 materials, as ViroReact's per-portal lighting environment (none: the ambient lights);
 passable lets the camera walk in. ignore_events keeps the node's mesh out of hit tests
 (`<scene/input>`): rays pass through it. alive is false once the node is removed. Change
@@ -2269,6 +2270,7 @@ struct SceneMaterial {
     bool chroma_key;
     Vec3 chroma_key_color;
     bool no_color_write;
+    int color_write_mask;
     bool bloom;
     float bloom_threshold;
 }
@@ -2294,6 +2296,8 @@ object); it is drawn blended, writes no depth and casts nothing. chroma_key make
 colors near chroma_key_color transparent (ViroReact's chromaKeyFilteringColor, for
 green-screen video). no_color_write draws depth only (ViroReact's colorWriteMask None): an
 invisible occluder, such as the real world's mesh, that hides what is behind it.
+color_write_mask writes only some channels (SCENE_COLOR_RED | GREEN | BLUE | ALPHA, as
+ViroReact's colorWriteMask); 0 writes all of them.
 
 ### SCENE_WRAP_REPEAT, SCENE_WRAP_CLAMP, SCENE_WRAP_MIRROR
 
@@ -2327,10 +2331,21 @@ A material of lighting model lighting with the defaults: white diffuse at intens
 white specular with shininess 32, no emission, metalness 0, roughness 0.5, normal scale
 and occlusion strength 1, opaque, alpha cutoff 0.5, ALPHA blending, one-sided.
 
+### SCENE_COLOR_RED, SCENE_COLOR_GREEN, SCENE_COLOR_BLUE, SCENE_COLOR_ALPHA
+
+```eskiu
+const int SCENE_COLOR_RED = 1;
+const int SCENE_COLOR_GREEN = 2;
+const int SCENE_COLOR_BLUE = 4;
+const int SCENE_COLOR_ALPHA = 8;
+```
+
+SceneMaterial.color_write_mask's channels.
+
 ### SCENE_KEY_SHADER
 
 ```eskiu
-const int SCENE_KEY_SHADER = 131072;
+const int SCENE_KEY_SHADER = 2097152;
 ```
 
 The multiple of a key that holds the material's shader program (scene_key_shader).
@@ -2435,6 +2450,14 @@ bool scene_key_no_color(int key)
 ```
 
 Whether a key writes no color (SceneMaterial.no_color_write).
+
+### scene_key_color_mask
+
+```eskiu
+int scene_key_color_mask(int key)
+```
+
+The channels a key writes (SceneMaterial.color_write_mask; 15 is all of them).
 
 ### scene_key_chroma
 

@@ -120,7 +120,7 @@ const int SCENE_BILLBOARD_Z = 4;
 // (SCENE_BILLBOARD_*) turns the node to face the camera. portal makes the node's subtree a
 // world of its own, seen through the meshes of its descendants marked portal_entrance
 // (ViroPortalScene and ViroPortal), with portal_sky (a texture id: a cube, or a 360 image
-// with portal_sky_pano) behind it and portal_ibl (a GpuIbl, not owned) lighting its PBR
+// with portal_sky_pano, turned by portal_sky_rotation) behind it and portal_ibl (a GpuIbl, not owned) lighting its PBR
 // materials, as ViroReact's per-portal lighting environment (none: the ambient lights);
 // passable lets the camera walk in. ignore_events keeps the node's mesh out of hit tests
 // (<scene/input>): rays pass through it. alive is false once the node is removed. Change
@@ -153,6 +153,7 @@ struct SceneNode {
     bool passable;
     int portal_sky;
     bool portal_sky_pano;
+    Quat portal_sky_rotation;
     *GpuIbl portal_ibl;
     bool ignore_events;
     // hit tests against its and its descendants' triangles instead of bounds (needs Scene.keep_mesh_copies

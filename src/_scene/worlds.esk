@@ -200,11 +200,13 @@ Result<int, string> _scene_world_pass(*Scene self, *GpuPass pass, int world, int
     *GpuTexture sky = self.skybox;
     bool pano = self.sky_pano;
     bool flip = self.sky_flip;
+    Quat turn = self.sky_rotation;
     if (world > 0) {
         *SceneNode pn = &self.nodes.data[world];
         sky = Scene_texture(self, pn.portal_sky);
         pano = pn.portal_sky_pano;
         flip = false;
+        turn = pn.portal_sky_rotation;
     }
     bool sky_drawn = false;
     int extra = masked ? _SCENE_KEY_MASKED : 0;
@@ -213,14 +215,14 @@ Result<int, string> _scene_world_pass(*Scene self, *GpuPass pass, int world, int
         bool mine = d.world == world || (frames_of > 0 && d.frame == frames_of);
         if (!mine || (skip_frames_of > 0 && d.frame == skip_frames_of)) continue;
         if (d.blend && !sky_drawn) {
-            if (sky != null) _scene_sky_draw(&r.sky, pass, sky, pano, r.view_proj, self.sky_rotation, self.sky_intensity, flip, masked);
+            if (sky != null) _scene_sky_draw(&r.sky, pass, sky, pano, r.view_proj, turn, self.sky_intensity, flip, masked);
             sky_drawn = true;
         }
         if (!d.in_view) continue;
         *GpuPipeline p = _scene_pipeline(self, d.key + extra)?;
         _scene_draw(self, pass, d, p);
     }
-    if (!sky_drawn && sky != null) _scene_sky_draw(&r.sky, pass, sky, pano, r.view_proj, self.sky_rotation, self.sky_intensity, flip, masked);
+    if (!sky_drawn && sky != null) _scene_sky_draw(&r.sky, pass, sky, pano, r.view_proj, turn, self.sky_intensity, flip, masked);
     return Ok<int, string>(0);
 }
 
