@@ -4,7 +4,10 @@
 Result<int, string> Scene_render(*Scene self, WGPUTextureView view, uint32 width, uint32 height, WGPUTextureFormat format) {
     GpuEncoder enc = self.gpu.encoder();
     Scene_render_in(self, &enc, view, width, height, format)?;
-    return enc.submit();
+    Scene_stage_begin(self, SCENE_STAGE_SUBMIT);
+    Result<int, string> done = enc.submit();
+    Scene_stage_end(self, SCENE_STAGE_SUBMIT);
+    return done;
 }
 
 // Renders into a texture (Gpu_target, Gpu_target_with), to read back or sample.

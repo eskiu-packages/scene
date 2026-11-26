@@ -240,6 +240,10 @@ void Scene_release(*Scene self) {
     r.mat_layout.release();
     r.shadow_layout.release();
     r.made = false;
+    if (self.profiler.timer_made) self.profiler.timer.release();
+    self.profiler.timer_made = false;
+    self.profiler.on = false;
+    List_free(&self.profiler.history);
     for (i in 0..self.meshes.size) {
         self.meshes.data[i].vertices.release();
         self.meshes.data[i].indices.release();

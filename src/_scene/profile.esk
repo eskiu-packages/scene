@@ -1,0 +1,114 @@
+// _scene/profile.esk: frame stats and resource counts of a scene (part of scene.esk, which imports it in order after the ones before it)
+
+// Turns profiling on or off (it starts off). On, every stage of each frame is timed on the
+// CPU (two clock reads per stage, about 20 per frame), and the GPU's time of each
+// Scene_render is measured when the device has timestamp queries (Gpu.timestamps; a
+// GpuTimer of 32 passes, made here). Turning it on clears earlier measurements. Off, the
+// stage calls return at once. Call Scene_frame_end once a frame.
+void Scene_profile(*Scene self, bool on) {
+    *SceneProfiler p = &self.profiler;
+    if (!on) {
+        p.on = false;
+        p.gpu = false;
+        if (p.timer_made) p.timer.release();
+        p.timer_made = false;
+        return;
+    }
+    p.on = true;
+    SceneProfiler_reset(p);
+    if (!p.timer_made) {
+        p.gpu_note = null;
+        if (!self.gpu.timestamps) {
+            p.gpu_note = self.gpu.webgl2 ? "WebGL2 has no timestamp queries" : "the device has no timestamp queries";
+        } else {
+            Result<GpuTimer, string> t = self.gpu.timer(32);
+            if (t.ok) {
+                p.timer = t.value;
+                p.timer_made = true;
+            } else {
+                p.gpu_note = "the timer could not be made";
+            }
+        }
+    }
+    p.gpu = p.timer_made;
+}
+
+// Starts timing stage (SCENE_STAGE_*) in the current frame; the stage running now pauses
+// until stage ends. Nothing when profiling is off.
+void Scene_stage_begin(*Scene self, int stage) {
+    if (self.profiler.on) SceneProfiler_begin(&self.profiler, stage);
+}
+
+// Stops timing stage.
+void Scene_stage_end(*Scene self, int stage) {
+    if (self.profiler.on) SceneProfiler_end(&self.profiler, stage);
+}
+
+// Closes the frame (call it once a frame, after present): Scene_frame_stats then returns
+// it and the summary includes it.
+void Scene_frame_end(*Scene self) {
+    *SceneProfiler p = &self.profiler;
+    if (!p.on) return;
+    if (p.timer_made) GpuTimer_poll(&p.timer);
+    SceneProfiler_frame_end(p, p.timer_made ? &p.timer : null);
+}
+
+// The last frame closed by Scene_frame_end (frame -1 before the first).
+SceneFrameStats Scene_frame_stats(*Scene self) {
+    return self.profiler.last;
+}
+
+// The average and the maximum over the last frames (SceneProfiler.window, 120 by default).
+SceneStatsSummary Scene_stats_summary(*Scene self) {
+    return SceneProfiler_summary(&self.profiler);
+}
+
+// Appends the summary as a table to out (SceneProfiler_report).
+void Scene_stats_report(*Scene self, String* out) {
+    SceneProfiler_report(&self.profiler, out);
+}
+
+// Starts timing the GPU work of enc when profiling the GPU: Scene_render_in calls it, so
+// the passes recorded into the encoder after the scene's (an interface) are timed too.
+void _scene_profile_encoder(*Scene self, *GpuEncoder enc) {
+    *SceneProfiler p = &self.profiler;
+    if (!p.on || !p.timer_made || enc.timer != null) return;
+    GpuEncoder_time(enc, &p.timer);
+}
+
+// What the scene holds now, with the process's GPU objects (SceneCounts).
+SceneCounts Scene_counts(*Scene self) {
+    SceneCounts c;
+    for (i in 0..self.nodes.size) {
+        if (self.nodes.data[i].alive) c.nodes++;
+    }
+    c.node_slots = self.nodes.size;
+    c.mesh_slots = self.meshes.size > 0 ? self.meshes.size - 1 : 0;
+    c.material_slots = self.materials.size > 0 ? self.materials.size - 1 : 0;
+    c.texture_slots = self.textures.size > 0 ? self.textures.size - 1 : 0;
+    for (i in 1..self.meshes.size) {
+        *SceneMesh m = &self.meshes.data[i];
+        if (m.vertices.handle == null) continue;
+        c.meshes++;
+        c.mesh_bytes = c.mesh_bytes + m.vertices.size;
+        if (m.indices.handle != null) c.mesh_bytes = c.mesh_bytes + m.indices.size;
+        if (m.morph.handle != null) c.mesh_bytes = c.mesh_bytes + m.morph.size;
+    }
+    for (i in 1..self._r.mats.size) {
+        if (self._r.mats.data[i].made) c.materials++;
+    }
+    for (i in 1..self.textures.size) {
+        *GpuTexture t = &self.textures.data[i];
+        if (t.handle == null) continue;
+        c.textures++;
+        c.texture_bytes = c.texture_bytes + t.bytes();
+    }
+    c.lights = self.lights.size;
+    c.shaders = self.shaders.size > 0 ? self.shaders.size - 1 : 0;
+    c.pipelines = self._r.pipes.size + self._r.shadow_pipes.size;
+    for (i in 0..self._r.nodes.size) {
+        if (self._r.nodes.data[i].made) c.node_gpu++;
+    }
+    c.gpu = gpu_counts();
+    return c;
+}

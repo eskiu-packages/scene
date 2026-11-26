@@ -434,6 +434,8 @@ float _sp_factor(*SceneParticleModifier m, *_SceneParticle p) {
 // Advances the emitter to time (seconds): spawns, moves, ages and removes particles, and
 // rebuilds the quads facing the scene's camera. Call it once a frame after moving nodes.
 Result<int, string> SceneParticleEmitter_update(*SceneParticleEmitter self, *Scene scene, double time) {
+    Scene_stage_begin(scene, SCENE_STAGE_PARTICLES);
+    defer Scene_stage_end(scene, SCENE_STAGE_PARTICLES);
     Scene_update(scene);
     if (self.node < 0 || self.node >= scene.nodes.size || !scene.nodes.data[self.node].alive) return Ok<int, string>(0);
     self._world = scene.nodes.data[self.node].world;

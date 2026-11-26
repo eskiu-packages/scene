@@ -484,6 +484,8 @@ void _scene_play_free(*_ScenePlay p) {
 // Advances every playing animation to time and sets the nodes' properties. Call it once
 // a frame, before rendering.
 void SceneAnimations_update(*SceneAnimations self, *Scene scene, double time) {
+    Scene_stage_begin(scene, SCENE_STAGE_ANIMATION);
+    defer Scene_stage_end(scene, SCENE_STAGE_ANIMATION);
     List<int> ended;
     for (i in 0..self.plays.size) {
         if (!self.plays.data[i].active || self.plays.data[i].paused) continue;

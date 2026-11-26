@@ -234,6 +234,8 @@ void _ph_events(*ScenePhysicsWorld self, double time) {
 // Advances the world to time (seconds) in fixed steps and moves the dynamic bodies' nodes.
 // Returns the number of steps taken.
 int ScenePhysicsWorld_update(*ScenePhysicsWorld self, *Scene scene, double time) {
+    Scene_stage_begin(scene, SCENE_STAGE_PHYSICS);
+    defer Scene_stage_end(scene, SCENE_STAGE_PHYSICS);
     Scene_update(scene);
     if (!self._started) {
         self._started = true;

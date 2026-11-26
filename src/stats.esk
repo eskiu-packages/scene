@@ -1,0 +1,366 @@
+// stats.esk: where a frame's time goes and what a scene holds (imported by <scene>).
+//
+// With Scene_profile on, the scene times each stage of a frame on the CPU, and the GPU's
+// own time when the device has timestamp queries; Scene_frame_end closes a frame. The
+// app times its own code into the same frame with Scene_stage_begin and Scene_stage_end:
+//
+//     scene.profile(true);
+//     ...each frame:
+//     scene.stage_begin(SCENE_STAGE_APP);
+//     update_game(&game, dt);
+//     scene.stage_end(SCENE_STAGE_APP);
+//     anims.update(&scene, t);                           // SCENE_STAGE_ANIMATION
+//     scene.stage_begin(SCENE_STAGE_ACQUIRE);
+//     GpuFrame frame = surface.frame()?;
+//     scene.stage_end(SCENE_STAGE_ACQUIRE);
+//     scene.render(frame.view, w, h, surface.format)?;  // transforms to submit
+//     scene.stage_begin(SCENE_STAGE_PRESENT);
+//     surface.present(&frame);
+//     scene.stage_end(SCENE_STAGE_PRESENT);
+//     scene.frame_end();
+//     SceneFrameStats s = scene.frame_stats();
+//
+// Scene_counts gives the live nodes, meshes, materials, textures and the GPU objects of
+// the process (gpu_counts), to compare before and after something that should leave
+// nothing behind. docs/profiling.md is the guide.
+
+import <io>;
+import <mem>;
+import <list>;
+import <string>;
+import <time>;
+import <gpu/core>;
+import <gpu/render>;
+
+// The stages of a frame (SceneFrameStats.cpu_ms). APP, ACQUIRE and PRESENT are timed by
+// the app around its own code, surface.frame() and surface.present(); ANIMATION, PHYSICS
+// and PARTICLES by SceneAnimations_update, ScenePhysicsWorld_update and
+// SceneParticleEmitter_update; the rest by Scene_render and Scene_render_in.
+const int SCENE_STAGE_APP = 0;
+const int SCENE_STAGE_ANIMATION = 1;
+const int SCENE_STAGE_PHYSICS = 2;
+const int SCENE_STAGE_PARTICLES = 3;
+// the world matrices of every node (Scene_update)
+const int SCENE_STAGE_TRANSFORMS = 4;
+// the camera, the draw list with frustum culling, sorting and the lights picked
+const int SCENE_STAGE_CULL = 5;
+// uniforms written, per-node and per-material GPU objects made or updated, pipelines made
+// (a shader compiled the first time a material variant shows lands here)
+const int SCENE_STAGE_PREPARE = 6;
+// the shadow, scene, bloom and post-processing passes recorded
+const int SCENE_STAGE_ENCODE = 7;
+// the commands finished, validated and sent to the GPU (Scene_render; with
+// Scene_render_in, time your own submit with this stage)
+const int SCENE_STAGE_SUBMIT = 8;
+// the wait for the next drawable (surface.frame())
+const int SCENE_STAGE_ACQUIRE = 9;
+// surface.present()
+const int SCENE_STAGE_PRESENT = 10;
+const int SCENE_STAGES = 11;
+
+// The rolling summary's length, in frames, unless SceneProfiler.window says otherwise.
+const int SCENE_STATS_WINDOW = 120;
+
+// The name of a stage ("app", "animation", ..., "present"), "?" for another number.
+string scene_stage_name(int stage) {
+    if (stage == SCENE_STAGE_APP) return "app";
+    if (stage == SCENE_STAGE_ANIMATION) return "animation";
+    if (stage == SCENE_STAGE_PHYSICS) return "physics";
+    if (stage == SCENE_STAGE_PARTICLES) return "particles";
+    if (stage == SCENE_STAGE_TRANSFORMS) return "transforms";
+    if (stage == SCENE_STAGE_CULL) return "cull";
+    if (stage == SCENE_STAGE_PREPARE) return "prepare";
+    if (stage == SCENE_STAGE_ENCODE) return "encode";
+    if (stage == SCENE_STAGE_SUBMIT) return "submit";
+    if (stage == SCENE_STAGE_ACQUIRE) return "acquire";
+    if (stage == SCENE_STAGE_PRESENT) return "present";
+    return "?";
+}
+
+// One frame's measurements. cpu_ms holds each stage's own time in milliseconds (a stage
+// begun inside another is taken out of the outer one, so they add up), cpu_total_ms their
+// sum, and frame_ms the time since the previous Scene_frame_end (the frame interval: 16.7
+// at 60 frames a second). gpu_ms is the GPU's time for the passes of the latest Scene_render
+// it has timed, from an earlier frame (gpu_frame, 1 to 3 frames back), or -1 when not
+// available (SceneProfiler.gpu_note says why). draws counts draw calls of meshes (shadow
+// maps included), culled the meshes outside the view, shadow_maps the shadow passes and
+// pipelines_made the material pipelines made in the frame.
+struct SceneFrameStats {
+    int64 frame;
+    double[11] cpu_ms;
+    double cpu_total_ms;
+    double frame_ms;
+    double gpu_ms;
+    int64 gpu_frame;
+    int draws;
+    int culled;
+    int shadow_maps;
+    int pipelines_made;
+}
+
+// The average and the largest value of each field over the last frames (frames of them;
+// gpu_frames had a GPU time, and avg.gpu_ms averages only those, -1 when none).
+struct SceneStatsSummary {
+    int frames;
+    int gpu_frames;
+    SceneFrameStats avg;
+    SceneFrameStats max;
+}
+
+// The profiling state of a scene (Scene.profiler). on is set by Scene_profile; gpu says the
+// GPU is timed, gpu_note why not when it is not; window is the number of frames the summary
+// covers (SCENE_STATS_WINDOW when 0, at most 1000).
+struct SceneProfiler {
+    bool on;
+    bool gpu;
+    string gpu_note;
+    int window;
+    SceneFrameStats cur;
+    SceneFrameStats last;
+    List<SceneFrameStats> history;
+    int next;
+    int[16] stack;
+    int depth;
+    double mark;
+    double frame_start;
+    GpuTimer timer;
+    bool timer_made;
+}
+
+#ifdef _WIN32
+extern int QueryPerformanceCounter(*int64 count);
+extern int QueryPerformanceFrequency(*int64 frequency);
+#endif
+
+// A monotonic clock in milliseconds, with sub-microsecond resolution, from an arbitrary
+// origin.
+double scene_clock_ms() {
+#ifdef _WIN32
+    int64 count = 0;
+    int64 frequency = 1;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&count);
+    return (double)count * 1000.0 / (double)frequency;
+#else
+    timespec ts;
+    clock_gettime(CLOCK_MONO, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+#endif
+}
+
+SceneFrameStats _scene_stats_zero(int64 frame) {
+    SceneFrameStats s;
+    s.frame = frame;
+    s.gpu_ms = -1.0;
+    s.gpu_frame = -1;
+    return s;
+}
+
+// Starts timing stage: the stage running now pauses until stage ends.
+void SceneProfiler_begin(*SceneProfiler self, int stage) {
+    if (!self.on || stage < 0 || stage >= SCENE_STAGES) return;
+    double now = scene_clock_ms();
+    if (self.depth > 0) {
+        int top = self.stack[self.depth - 1];
+        self.cur.cpu_ms[top] = self.cur.cpu_ms[top] + (now - self.mark);
+    }
+    if (self.depth < 16) {
+        self.stack[self.depth] = stage;
+        self.depth++;
+    }
+    self.mark = now;
+}
+
+// Stops timing stage and resumes the stage it interrupted. Stages begun inside it and not
+// ended (an error returned early) end with it.
+void SceneProfiler_end(*SceneProfiler self, int stage) {
+    if (!self.on || self.depth == 0) return;
+    int at = self.depth - 1;
+    while (at >= 0 && self.stack[at] != stage) at--;
+    if (at < 0) return;
+    double now = scene_clock_ms();
+    int top = self.stack[self.depth - 1];
+    self.cur.cpu_ms[top] = self.cur.cpu_ms[top] + (now - self.mark);
+    self.depth = at;
+    self.mark = now;
+}
+
+// Closes the frame: its stats become last, go into the rolling history, and a new frame
+// starts. gpu_ms and gpu_frame are what timer last measured (null: none).
+void SceneProfiler_frame_end(*SceneProfiler self, *GpuTimer timer) {
+    if (!self.on) return;
+    double now = scene_clock_ms();
+    while (self.depth > 0) SceneProfiler_end(self, self.stack[self.depth - 1]);
+    *SceneFrameStats s = &self.cur;
+    s.cpu_total_ms = 0.0;
+    for (i in 0..SCENE_STAGES) s.cpu_total_ms = s.cpu_total_ms + s.cpu_ms[i];
+    s.frame_ms = now - self.frame_start;
+    self.frame_start = now;
+    if (timer != null && timer.last_frame >= 0) {
+        s.gpu_ms = timer.last_ms;
+        s.gpu_frame = timer.last_frame;
+    }
+    int window = self.window > 0 ? self.window : SCENE_STATS_WINDOW;
+    if (window > 1000) window = 1000;
+    if (self.history.size > window) {
+        List_clear(&self.history);
+        self.next = 0;
+    }
+    if (self.history.size < window) {
+        List_push(&self.history, *s);
+    } else {
+        self.history.data[self.next] = *s;
+    }
+    self.next = (self.next + 1) % window;
+    self.last = *s;
+    self.cur = _scene_stats_zero(s.frame + 1);
+}
+
+// Clears the measurements and starts a new first frame now.
+void SceneProfiler_reset(*SceneProfiler self) {
+    List_clear(&self.history);
+    self.next = 0;
+    self.depth = 0;
+    self.cur = _scene_stats_zero(0);
+    self.last = _scene_stats_zero(-1);
+    self.frame_start = scene_clock_ms();
+}
+
+double _scene_max_d(double a, double b) {
+    return a > b ? a : b;
+}
+
+// The average and the maximum of every field over the frames in the history.
+SceneStatsSummary SceneProfiler_summary(*SceneProfiler self) {
+    SceneStatsSummary r;
+    r.avg = _scene_stats_zero(-1);
+    r.max = _scene_stats_zero(-1);
+    r.frames = self.history.size;
+    if (r.frames == 0) return r;
+    double gpu_sum = 0.0;
+    double draws = 0.0;
+    double culled = 0.0;
+    double shadows = 0.0;
+    double made = 0.0;
+    r.avg.gpu_ms = 0.0;
+    for (i in 0..self.history.size) {
+        *SceneFrameStats s = &self.history.data[i];
+        for (k in 0..SCENE_STAGES) {
+            r.avg.cpu_ms[k] = r.avg.cpu_ms[k] + s.cpu_ms[k];
+            r.max.cpu_ms[k] = _scene_max_d(r.max.cpu_ms[k], s.cpu_ms[k]);
+        }
+        r.avg.cpu_total_ms = r.avg.cpu_total_ms + s.cpu_total_ms;
+        r.max.cpu_total_ms = _scene_max_d(r.max.cpu_total_ms, s.cpu_total_ms);
+        r.avg.frame_ms = r.avg.frame_ms + s.frame_ms;
+        r.max.frame_ms = _scene_max_d(r.max.frame_ms, s.frame_ms);
+        if (s.gpu_ms >= 0.0) {
+            gpu_sum = gpu_sum + s.gpu_ms;
+            r.gpu_frames++;
+            r.max.gpu_ms = _scene_max_d(r.max.gpu_ms, s.gpu_ms);
+        }
+        draws = draws + (double)s.draws;
+        culled = culled + (double)s.culled;
+        shadows = shadows + (double)s.shadow_maps;
+        made = made + (double)s.pipelines_made;
+        if (s.draws > r.max.draws) r.max.draws = s.draws;
+        if (s.culled > r.max.culled) r.max.culled = s.culled;
+        if (s.shadow_maps > r.max.shadow_maps) r.max.shadow_maps = s.shadow_maps;
+        if (s.pipelines_made > r.max.pipelines_made) r.max.pipelines_made = s.pipelines_made;
+        if (s.frame > r.max.frame) r.max.frame = s.frame;
+    }
+    double n = (double)r.frames;
+    for (k in 0..SCENE_STAGES) r.avg.cpu_ms[k] = r.avg.cpu_ms[k] / n;
+    r.avg.cpu_total_ms = r.avg.cpu_total_ms / n;
+    r.avg.frame_ms = r.avg.frame_ms / n;
+    r.avg.gpu_ms = r.gpu_frames > 0 ? gpu_sum / (double)r.gpu_frames : -1.0;
+    if (r.gpu_frames == 0) r.max.gpu_ms = -1.0;
+    r.avg.draws = (int)(draws / n + 0.5);
+    r.avg.culled = (int)(culled / n + 0.5);
+    r.avg.shadow_maps = (int)(shadows / n + 0.5);
+    r.avg.pipelines_made = (int)(made / n + 0.5);
+    r.avg.frame = r.max.frame;
+    return r;
+}
+
+// Appends the summary as a table: each stage's average and largest time over the history,
+// the CPU total, the frame interval, the GPU time (or why there is none) and the draws.
+void SceneProfiler_report(*SceneProfiler self, String* out) {
+    SceneStatsSummary r = SceneProfiler_summary(self);
+    String_appendf(out, "%d frames          avg ms    max ms\n", r.frames);
+    for (k in 0..SCENE_STAGES) {
+        String_appendf(out, "  %-14s %8.3f  %8.3f\n", scene_stage_name(k), r.avg.cpu_ms[k], r.max.cpu_ms[k]);
+    }
+    String_appendf(out, "  %-14s %8.3f  %8.3f\n", "cpu total", r.avg.cpu_total_ms, r.max.cpu_total_ms);
+    String_appendf(out, "  %-14s %8.3f  %8.3f\n", "frame interval", r.avg.frame_ms, r.max.frame_ms);
+    if (r.gpu_frames > 0) {
+        String_appendf(out, "  %-14s %8.3f  %8.3f  (%d frames timed)\n", "gpu", r.avg.gpu_ms, r.max.gpu_ms, r.gpu_frames);
+    } else {
+        String_appendf(out, "  gpu            unavailable (%s)\n", self.gpu_note != null ? self.gpu_note : "not timed");
+    }
+    String_appendf(out, "  draws %d (max %d), culled %d, shadow maps %d, pipelines made %d (max %d in a frame)\n",
+        r.avg.draws, r.max.draws, r.avg.culled, r.avg.shadow_maps, r.avg.pipelines_made, r.max.pipelines_made);
+}
+
+// What a scene holds (Scene_counts). nodes are the live ones (the root included), meshes
+// the meshes with GPU buffers (mesh_bytes their vertex, index and morph buffers), materials
+// the materials with GPU objects (made when first drawn, released by Scene_free_material),
+// textures the textures with a GPU texture (texture_bytes as GpuTexture_bytes). The
+// *_slots are the ids handed out, which are never reused: a removed node or a freed mesh,
+// material or texture keeps its id (a few hundred bytes of CPU memory each), so they only
+// grow; the empty id 0 of meshes, materials and textures is not counted. pipelines is the
+// scene's pipeline cache, node_gpu the nodes with their own uniforms and bind group (made
+// when first drawn, released when removed). gpu is gpu_counts(): every GPU object of the
+// process, the scene's renderer and the app's own included.
+struct SceneCounts {
+    int nodes;
+    int node_slots;
+    int meshes;
+    int mesh_slots;
+    uint64 mesh_bytes;
+    int materials;
+    int material_slots;
+    int textures;
+    int texture_slots;
+    uint64 texture_bytes;
+    int lights;
+    int shaders;
+    int pipelines;
+    int node_gpu;
+    GpuCounts gpu;
+}
+
+void _scene_grew(String* out, string what, int64 before, int64 after, int* n) {
+    if (after <= before) return;
+    if (out != null) String_appendf(out, "%s %lld -> %lld (+%lld)\n", what, before, after, after - before);
+    *n = *n + 1;
+}
+
+// The number of counts that are higher in self than in baseline, each described on a
+// line appended to out (null: not described). The way to find a leak: take a baseline,
+// do what should leave nothing behind a few times, and compare (docs/profiling.md).
+int SceneCounts_growth(*SceneCounts self, *SceneCounts baseline, String* out) {
+    int n = 0;
+    _scene_grew(out, "nodes", (int64)baseline.nodes, (int64)self.nodes, &n);
+    _scene_grew(out, "node slots", (int64)baseline.node_slots, (int64)self.node_slots, &n);
+    _scene_grew(out, "meshes", (int64)baseline.meshes, (int64)self.meshes, &n);
+    _scene_grew(out, "mesh slots", (int64)baseline.mesh_slots, (int64)self.mesh_slots, &n);
+    _scene_grew(out, "mesh bytes", (int64)baseline.mesh_bytes, (int64)self.mesh_bytes, &n);
+    _scene_grew(out, "materials", (int64)baseline.materials, (int64)self.materials, &n);
+    _scene_grew(out, "material slots", (int64)baseline.material_slots, (int64)self.material_slots, &n);
+    _scene_grew(out, "textures", (int64)baseline.textures, (int64)self.textures, &n);
+    _scene_grew(out, "texture slots", (int64)baseline.texture_slots, (int64)self.texture_slots, &n);
+    _scene_grew(out, "texture bytes", (int64)baseline.texture_bytes, (int64)self.texture_bytes, &n);
+    _scene_grew(out, "lights", (int64)baseline.lights, (int64)self.lights, &n);
+    _scene_grew(out, "shaders", (int64)baseline.shaders, (int64)self.shaders, &n);
+    _scene_grew(out, "pipelines", (int64)baseline.pipelines, (int64)self.pipelines, &n);
+    _scene_grew(out, "node gpu", (int64)baseline.node_gpu, (int64)self.node_gpu, &n);
+    _scene_grew(out, "gpu buffers", (int64)baseline.gpu.buffers, (int64)self.gpu.buffers, &n);
+    _scene_grew(out, "gpu buffer bytes", (int64)baseline.gpu.buffer_bytes, (int64)self.gpu.buffer_bytes, &n);
+    _scene_grew(out, "gpu textures", (int64)baseline.gpu.textures, (int64)self.gpu.textures, &n);
+    _scene_grew(out, "gpu texture bytes", (int64)baseline.gpu.texture_bytes, (int64)self.gpu.texture_bytes, &n);
+    _scene_grew(out, "gpu render pipelines", (int64)baseline.gpu.render_pipelines, (int64)self.gpu.render_pipelines, &n);
+    _scene_grew(out, "gpu compute pipelines", (int64)baseline.gpu.compute_pipelines, (int64)self.gpu.compute_pipelines, &n);
+    _scene_grew(out, "gpu bind groups", (int64)baseline.gpu.bind_groups, (int64)self.gpu.bind_groups, &n);
+    _scene_grew(out, "gpu samplers", (int64)baseline.gpu.samplers, (int64)self.gpu.samplers, &n);
+    return n;
+}

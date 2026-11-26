@@ -213,6 +213,7 @@ void _scene_draw(*Scene self, *GpuPass pass, *_SceneDraw d, *GpuPipeline pipe) {
     pass.set_group(2, &r.mats.data[d.material].group);
     if (r.mats.data[d.material].mod_made && scene_key_shader(d.key) > 0) pass.set_group(3, &r.mats.data[d.material].mod_group);
     pass.draw_indexed(pipe, &mesh.vertices, &mesh.indices, mesh.index_count, _scene_instance_count(self, d.node));
+    if (self.profiler.on) self.profiler.cur.draws++;
 }
 
 // Records the scene into enc: shadow maps, the scene in HDR, then bloom and tone mapping
@@ -248,7 +249,16 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
         r.depth_prev_view = tv;
     }
     _scene_msaa_targets(self, width, height)?;
+    bool prof = self.profiler.on;
+    if (prof) {
+        _scene_profile_encoder(self, enc);
+        SceneProfiler_begin(&self.profiler, SCENE_STAGE_TRANSFORMS);
+    }
     Scene_update(self);
+    if (prof) {
+        SceneProfiler_end(&self.profiler, SCENE_STAGE_TRANSFORMS);
+        SceneProfiler_begin(&self.profiler, SCENE_STAGE_CULL);
+    }
     _scene_camera(self, width, height);
     List_clear(&r.draws);
     List_clear(&r.portals);
@@ -264,6 +274,14 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
         if (!d.blend && self.nodes.data[d.node].casts_shadows) any_caster = true;
     }
     if (!any_caster) shadows = 0;
+    if (prof) {
+        for (i in 0..r.draws.size) {
+            if (!r.draws.data[i].in_view) self.profiler.cur.culled++;
+        }
+        self.profiler.cur.shadow_maps = self.profiler.cur.shadow_maps + shadows;
+        SceneProfiler_end(&self.profiler, SCENE_STAGE_CULL);
+        SceneProfiler_begin(&self.profiler, SCENE_STAGE_PREPARE);
+    }
     if (shadows > 0) _scene_shadow_targets(self, shadows)?;
 
     float[2304] lb;
@@ -374,6 +392,10 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
     for (i in 0..r.draws.size) {
         _scene_pipeline(self, r.draws.data[i].key)?;
     }
+    if (prof) {
+        SceneProfiler_end(&self.profiler, SCENE_STAGE_PREPARE);
+        SceneProfiler_begin(&self.profiler, SCENE_STAGE_ENCODE);
+    }
 
     for (k in 0..shadows) {
         GpuPassOptions so = GpuPassOptions{depth_view: &r.shadow_views.data[k]};
@@ -393,6 +415,7 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
                 sp.set_group(3, &r.mats.data[d.material].mod_group);
             }
             sp.draw_indexed(shp, &mesh.vertices, &mesh.indices, mesh.index_count, _scene_instance_count(self, d.node));
+            if (self.profiler.on) self.profiler.cur.draws++;
         }
         sp.end()?;
     }
@@ -425,7 +448,9 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
     } else if (post.bloom_marked_only) {
         post.bloom = false;
     }
-    return _scene_post_run(&r.post, enc, &r.hdr, view, format, &post, bg, bloom_from);
+    Result<int, string> done = _scene_post_run(&r.post, enc, &r.hdr, view, format, &post, bg, bloom_from);
+    if (prof) SceneProfiler_end(&self.profiler, SCENE_STAGE_ENCODE);
+    return done;
 }
 
 import "worlds.esk";

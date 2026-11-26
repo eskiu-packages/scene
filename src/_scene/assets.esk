@@ -447,6 +447,7 @@ Result<*GpuPipeline, string> _scene_pipeline(*Scene self, int key) {
     }
     d.samples = r.samples > 1 ? r.samples : (uint32)1;
     GpuPipeline p = self.gpu.pipeline(&d)?;
+    if (self.profiler.on) self.profiler.cur.pipelines_made++;
     List_push(&r.pipes, _ScenePipe{key, p});
     return Ok<*GpuPipeline, string>(&r.pipes.data[r.pipes.size - 1].pipe);
 }

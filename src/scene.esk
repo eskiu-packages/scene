@@ -49,6 +49,7 @@ import <scene/material>;
 import <scene/light>;
 import <scene/post>;
 import <scene/sky>;
+import <scene/stats>;
 
 // Camera projections (SceneCamera.projection).
 const int SCENE_PERSPECTIVE = 0;
@@ -441,9 +442,12 @@ struct Scene {
     // keep each mesh's positions and indices on the CPU too (for SceneNode.precise_hits)
     bool keep_mesh_copies;
     _SceneRenderer _r;
+    // frame timings and their history, when Scene_profile turned them on (<scene/stats>)
+    SceneProfiler profiler;
 }
 
 import "_scene/nodes.esk";
 import "_scene/assets.esk";
 import "_scene/gpu.esk";
 import "_scene/render.esk";
+import "_scene/profile.esk";
