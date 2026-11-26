@@ -149,6 +149,60 @@ int Scene_pipeline_count(*Scene self) {
     return self._r.pipes.size;
 }
 
+// Releases mesh's GPU buffers and CPU copies when it is no longer needed (a level left, a
+// model unloaded). The id is not reused: a node still holding it draws nothing until the
+// mesh gets geometry again (Scene_set_geometry). Nothing for id 0 or an unknown id.
+void Scene_free_mesh(*Scene self, int mesh) {
+    if (mesh <= 0 || mesh >= self.meshes.size) return;
+    *SceneMesh m = &self.meshes.data[mesh];
+    m.vertices.release();
+    m.indices.release();
+    m.morph.release();
+    m.targets = 0;
+    m.index_count = 0;
+    m.vertex_count = 0;
+    List_free(&m.cpu_positions);
+    List_free(&m.cpu_indices);
+    for (i in 0..self._r.nodes.size) {
+        if (self._r.nodes.data[i].bound_mesh == mesh) self._r.nodes.data[i].bound_mesh = -1;
+    }
+}
+
+// Releases material's GPU objects (its uniform buffers and bind groups). Its settings and
+// its id stay: a node drawn with it again makes them again. Nothing for the default
+// material (id 0) or an unknown id.
+void Scene_free_material(*Scene self, int material) {
+    if (material <= 0 || material >= self.materials.size) return;
+    *_SceneMatGpu g = &self._r.mats.data[material];
+    if (g.made) {
+        g.group.release();
+        g.uniforms.release();
+        g.made = false;
+    }
+    if (g.mod_made) {
+        g.mod_group.release();
+        g.mod_buffer.release();
+        g.mod_made = false;
+    }
+    g.freed = true;
+}
+
+// Releases texture id (unless it was borrowed, Scene_borrow_texture) and leaves the id
+// empty: materials using it show white until Scene_set_texture gives it a texture again.
+// Nothing for id 0 or an unknown id.
+void Scene_free_texture(*Scene self, int id) {
+    if (id <= 0 || id >= self.textures.size) return;
+    if (!_scene_borrowed(self, id)) self.textures.data[id].release();
+    GpuTexture none;
+    self.textures.data[id] = none;
+    _scene_set_borrowed(self, id, false);
+    for (i in 0..self._r.mats.size) {
+        for (k in 0..6) {
+            if (self._r.mats.data[i].bound[k] == id) self._r.mats.data[i].bound[k] = -1;
+        }
+    }
+}
+
 int _scene_gltf_texture(*Scene self, *Gltf g, *SceneGltf out, int ref, bool srgb) {
     if (ref < 0 || ref >= g.textures.size) return 0;
     int image = g.textures.data[ref].image;

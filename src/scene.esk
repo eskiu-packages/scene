@@ -218,6 +218,8 @@ struct _SceneNodeGpu {
 
 struct _SceneMatGpu {
     bool made;
+    // released by Scene_free_material: not made again until a draw uses it
+    bool freed;
     GpuBuffer uniforms;
     GpuBindGroup group;
     int[6] bound;

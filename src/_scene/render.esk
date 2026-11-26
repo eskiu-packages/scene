@@ -386,8 +386,9 @@ Result<int, string> Scene_render_in(*Scene self, *GpuEncoder enc, WGPUTextureVie
         u.morph[2] = instanced ? 1.0 : 0.0;
         r.nodes.data[d.node].uniforms.write(0, &u, sizeof(_SceneDrawU));
     }
+    for (i in 0..r.draws.size) r.mats.data[r.draws.data[i].material].freed = false;
     for (i in 0..self.materials.size) {
-        _scene_material_gpu(self, i)?;
+        if (!r.mats.data[i].freed) _scene_material_gpu(self, i)?;
     }
     for (i in 0..r.draws.size) {
         _scene_pipeline(self, r.draws.data[i].key)?;
