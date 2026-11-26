@@ -53,6 +53,8 @@ pipeline.
   billboards and frustum culling.
 - **Input.** Hit tests from the screen or any controller, and click, drag, pinch, rotate,
   hover and fuse events on nodes, bubbling to the nearest handler as in ViroReact.
+- **Profiling.** CPU time per frame stage, GPU time from timestamp queries, and counts of
+  the live nodes, meshes, textures and GPU objects to find leaks ([guide](docs/profiling.md)).
 
 ## A lit sphere
 

@@ -17,6 +17,7 @@ Guides and reference for scene. The [README](../README.md) has the overview.
 - [Property animations](animation.md): groups, easing, chains, loops
 - [Hit testing and events](input.md): rays, hit tests, click, drag, pinch, rotate, hover and fuse
 - [VR](vr.md): eyes, Cardboard, the reticle and controllers
+- [Profiling](profiling.md): frame time per stage, GPU time, counts and leaks
 - [API reference](api.md): every public function and type
 <!-- /pages -->
 

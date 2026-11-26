@@ -4,6 +4,20 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `<scene/stats>`: frame measurements. `Scene_profile` turns them on; each frame's CPU time per stage (app, animation, physics, particles, transforms, cull, prepare, encode, submit, acquire, present), the frame interval, the GPU time from timestamp queries (-1 where they are missing, such as WebGL2), draws, culled meshes, shadow maps and pipelines made, read with `Scene_frame_stats` after `Scene_frame_end`, with an average and maximum over the last frames (`Scene_stats_summary`, `Scene_stats_report`). The app times its own code with `Scene_stage_begin` and `Scene_stage_end`. Off by default; on, it costs about 20 clock reads a frame. Needs gpu's `GpuTimer` and `gpu_counts`.
+- `Scene_counts` and `SceneCounts_growth`: the live nodes, meshes, materials, textures (with bytes), pipelines and the process's GPU objects, to find what grows between two readings.
+- `Scene_free_mesh`, `Scene_free_material` and `Scene_free_texture`: release what a part of the game added when it is left.
+- `docs/profiling.md`: reading the stats, the reference scene (`tests/profiling.esk`), finding leaks, profiling on an iPhone with Instruments and Xcode's GPU capture.
+
+### Fixed
+
+- `SceneParticleEmitter_free` released neither its mesh's buffers nor its material's GPU objects: each emitter made and freed left them in the scene.
+- A removed node kept its name, children, joints, weights and instance lists until the scene was released, and `Scene_release` never freed the instance lists.
+
 ## [0.2.3] - 2026-11-22
 
 ### Added
