@@ -548,10 +548,14 @@ void _sp_modifier_free(*SceneParticleModifier m) {
     m.intervals.free();
 }
 
-// Removes the drawing node and frees the emitter's lists (the mesh and material stay in
-// the scene, unused).
+// Removes the drawing node, releases the GPU objects of its mesh and material
+// (Scene_free_mesh, Scene_free_material; their ids stay unused in the scene) and frees the
+// emitter's lists.
 void SceneParticleEmitter_free(*SceneParticleEmitter self, *Scene scene) {
     Scene_remove(scene, self.draw);
+    if (self.mesh > 0) Scene_free_mesh(scene, self.mesh);
+    if (self.material > 0) Scene_free_material(scene, self.material);
+    self.mesh = 0;
     self._alive.free();
     self._scheduled.free();
     self.bursts.free();
