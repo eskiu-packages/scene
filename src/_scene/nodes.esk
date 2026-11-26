@@ -259,6 +259,7 @@ void Scene_release(*Scene self) {
         List_free(&self.nodes.data[i].children);
         List_free(&self.nodes.data[i].joints);
         List_free(&self.nodes.data[i].weights);
+        List_free(&self.nodes.data[i].instances);
     }
     List_free(&self.nodes);
     List_free(&self.cameras);
@@ -366,6 +367,13 @@ void _scene_kill(*Scene self, int node) {
     g.weights.release();
     g.instances.release();
     for (i in 0..n.children.size) _scene_kill(self, n.children.data[i]);
+    // a removed node keeps its id but none of its lists
+    n = &self.nodes.data[node];
+    String_free(&n.name);
+    List_free(&n.children);
+    List_free(&n.joints);
+    List_free(&n.weights);
+    List_free(&n.instances);
 }
 
 // Removes node and its subtree from the scene (their ids are not reused). The root cannot
