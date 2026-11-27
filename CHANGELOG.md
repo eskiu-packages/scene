@@ -4,7 +4,11 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-26
+
+### Changed
+
+- Depends on gpu 0.8.0 (its counts and timer).
 
 ### Added
 
@@ -18,7 +22,7 @@ All notable changes to this package are documented here. The format follows
 - `SceneParticleEmitter_free` released neither its mesh's buffers nor its material's GPU objects: each emitter made and freed left them in the scene.
 - A removed node kept its name, children, joints, weights and instance lists until the scene was released, and `Scene_release` never freed the instance lists.
 
-## [0.2.3] - 2026-11-22
+## [0.2.3]
 
 ### Added
 
